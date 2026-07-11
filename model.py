@@ -184,7 +184,7 @@ class PolicyNetwork(DilatedConvHead):
 
     def forward(self, s, out_size):
         logits = super().forward(s, out_size)          # (B, |A|, H, W)
-        probs = F.softmax(logits, dim=1)
+        probs  = F.softmax(logits, dim=1)
         return probs
 
 
@@ -219,7 +219,7 @@ class PixelDRL_MG(nn.Module):
                  policy_hidden=128, value_hidden=128, n_layers=4):
         super().__init__()
         self.use_sam = use_sam
-        self.use_dc = use_dc
+        self.use_dc  = use_dc
 
         self.feature_extractor = VGG16HalfDilated(in_channels=in_channels)
         feat_channels = self.feature_extractor.out_channels
@@ -233,7 +233,7 @@ class PixelDRL_MG(nn.Module):
         self.policy_net = PolicyNetwork(feat_channels, hidden=policy_hidden,
                                          n_layers=n_layers, dilation=dilation,
                                          n_actions=n_actions)
-        self.value_net = ValueNetwork(feat_channels, hidden=value_hidden,
+        self.value_net  = ValueNetwork(feat_channels, hidden=value_hidden,
                                        n_layers=n_layers, dilation=dilation)
 
     def forward(self, x):
@@ -242,10 +242,10 @@ class PixelDRL_MG(nn.Module):
         returns: pi (B, |A|, H, W), V (B, H, W)
         """
         out_size = x.shape[-2:]
-        s_prime = self.feature_extractor(x)     # s'^(t)
-        s = self.sam(s_prime)                   # s^(t)
-        pi = self.policy_net(s, out_size)       # pi(a^(t)|s^(t))
-        v = self.value_net(s, out_size)         # V(s^(t))
+        s_prime  = self.feature_extractor(x)           # s'^(t)
+        s        = self.sam(s_prime)                   # s^(t)
+        pi       = self.policy_net(s, out_size)        # pi(a^(t)|s^(t))
+        v        = self.value_net(s, out_size)         # V(s^(t))
         return pi, v
 
     @torch.no_grad()
@@ -257,9 +257,9 @@ class PixelDRL_MG(nn.Module):
 
     def act_sample(self, x):
         """Stochastic action sampling (used during training, matches A3C)."""
-        pi, v = self.forward(x)
-        dist = torch.distributions.Categorical(probs=pi.permute(0, 2, 3, 1))
-        action = dist.sample()                  # (B, H, W)
+        pi, v    = self.forward(x)
+        dist     = torch.distributions.Categorical(probs=pi.permute(0, 2, 3, 1))
+        action   = dist.sample()                  # (B, H, W)
         log_prob = dist.log_prob(action)         # (B, H, W)
-        entropy = dist.entropy()                 # (B, H, W)
+        entropy  = dist.entropy()                 # (B, H, W)
         return action, log_prob, entropy, v
