@@ -1,0 +1,141 @@
+"""
+env.py
+------
+Implements the "Dynamic iterative update policy" described in the paper:
+each pixel I_i is an agent whose state s_i^(t) evolves over T = t_max steps.
+
+Action set A = {0, 1}:
+    a_i^(t) = 0  -> pixel set to background (mask -> 0)
+    a_i^(t) = 1  -> "do nothing" (mask keeps its current value)
+
+State propagation:
+    m^(0)          = ones_like(image)         (every pixel initially "foreground")
+    X^(t)          = image * m^(t)            ("temporary input", Fig. 1/2)
+    m^(t+1)_i      = 0                if a_i^(t) == 0
+                   = m^(t)_i          if a_i^(t) == 1   (do nothing)
+
+Segmentation output at step t:  f^(t) = m^(t)   (the evolving binary mask)
+
+Reward (Eq. 12):
+    r^(t) = || f^(t-1) - G ||^2 - || f^(t) - G ||^2      (computed per-pixel)
+
+This rewards actions that move a pixel's mask value closer to ground truth G,
+and penalizes actions that move it further away -- exactly the "better than
+before -> positive reward" rule described in the text.
+
+Return / advantage (Eqs. 8-16, PA3C, one-step / n-step case), computed in
+matrix form over the whole (B, H, W) pixel grid:
+
+    R_i^(t) = r_i^(t) + gamma * sum_{j in N(i)} w_{i-j} V(s_j^(t+1))
+
+For simplicity and because the local-window weights w_{i-j} are just the
+conv-filter weights of the value network itself (paper: "omega values are
+essentially convolution filter weights, which can be learned concurrently
+with theta_p and theta_v"), we approximate the neighbourhood-weighted future
+value sum_{j in N(i)} w_{i-j} V(s_j^{t+1}) with a small learned depthwise
+convolution over V(s^{t+1}) -- this reproduces the *mechanism* (each pixel's
+return depends on its own reward plus a learned local aggregation of its
+neighbours' predicted values) described in the paper without requiring
+access to the literal internal filter weights of the value network.
+"""
+
+import torch
+import torch.nn as nn
+
+
+class NeighborhoodAggregator(nn.Module):
+    """
+    Learns the w_{i-j} weights used in Eq. (8) to aggregate neighbouring
+    pixels' predicted values V(s_j^{t+1}) into the bootstrap term for pixel i.
+    A depthwise 3x3 convolution (no bias) is a natural, efficient
+    parameterization of "weights over a local window centred at pixel i".
+    """
+
+    def __init__(self, kernel_size=3):
+        super().__init__()
+        pad = kernel_size // 2
+        self.conv = nn.Conv2d(1, 1, kernel_size=kernel_size, padding=pad, bias=False)
+        # Initialize as (roughly) an average over the neighbourhood.
+        with torch.no_grad():
+            self.conv.weight.fill_(1.0 / (kernel_size * kernel_size))
+
+    def forward(self, v_next):
+        # v_next: (B, H, W) -> (B, 1, H, W) -> conv -> (B, H, W)
+        return self.conv(v_next.unsqueeze(1)).squeeze(1)
+
+
+class PixelEnv:
+    """
+    Stateless helper implementing the dynamic iterative update policy.
+    Keeps no internal state itself; the rollout loop in train.py owns
+    the (image, mask, ground_truth) tensors and calls these static-like
+    methods at every time step.
+    """
+
+    def __init__(self, device):
+        self.device = device
+
+    @staticmethod
+    def init_mask(image):
+        """m^(0) = ones_like(image); s_i^(0) = I_i as stated in the paper."""
+        return torch.ones_like(image)
+
+    @staticmethod
+    def temp_input(image, mask):
+        """X^(t) = image * m^(t)"""
+        return image * mask
+
+    @staticmethod
+    def step(mask, action):
+        """
+        Apply actions to obtain m^(t+1).
+          action == 0 -> background (0)
+          action == 1 -> do nothing (keep current mask value)
+        action: (B, H, W) long tensor in {0, 1}
+        mask:   (B, H, W) float tensor
+        """
+        keep = action.float()           # 1 where "do nothing", 0 where "set background"
+        new_mask = mask * keep
+        return new_mask
+
+    @staticmethod
+    def reward(prev_mask, new_mask, gt):
+        """
+        Eq. (12): r^(t) = ||f^(t-1)-G||^2 - ||f^(t)-G||^2, computed per-pixel
+        (squared error at each pixel location, not summed), which is the
+        natural pixel-level analogue used with Eqs. (9)/(11)'s per-pixel
+        averaging over N pixels.
+        """
+        prev_err = (prev_mask - gt) ** 2
+        new_err = (new_mask - gt) ** 2
+        return prev_err - new_err       # (B, H, W)
+
+
+def compute_targets(rewards, values, gamma, aggregator: NeighborhoodAggregator):
+    """
+    Computes R_i^(t) (Eq. 8) for every step of a rolled-out episode, in
+    matrix form, following Algorithm 1's backward accumulation (lines 17-19)
+    combined with the neighbourhood bootstrapping of Eq. (8).
+
+    rewards: list of length T, each (B, H, W)         -- r^(t), t = 0..T-1
+    values:  list of length T+1, each (B, H, W)        -- V(s^(t)), t = 0..T
+             (values[T] is the value of the terminal state, used for
+             bootstrapping the last step; for a non-terminal rollout this is
+             simply V(s^(T)) from a final forward pass, matching Algorithm 1
+             line 17: R_i = V(s_i^{(t)}; theta') for non-terminal states.)
+    gamma:   discount factor
+    aggregator: NeighborhoodAggregator module implementing sum_j w_{i-j} V_j
+
+    Returns:
+        returns: list of length T, each (B, H, W) -- R^(t) for t = 0..T-1
+    """
+    T = len(rewards)
+    returns = [None] * T
+    # Bootstrap from the last value estimate (Algorithm 1, line 17-19)
+    R = values[T].detach()
+    for t in reversed(range(T)):
+        # Eq. (8): R_i^(t) = r_i^(t) + gamma * sum_{j in N(i)} w_{i-j} V(s_j^{(t+1)})
+        bootstrap = aggregator(values[t + 1].detach()) if t + 1 <= T else R
+        R = rewards[t] + gamma * bootstrap
+        returns[t] = R
+    return returns
