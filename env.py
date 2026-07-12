@@ -3,24 +3,22 @@ import torch.nn as nn
 
 
 class NeighborhoodAggregator(nn.Module):
-    """
-    Learns the w_{i-j} weights used in Eq. (8) to aggregate neighbouring
-    pixels' predicted values V(s_j^{t+1}) into the bootstrap term for pixel i.
-    A depthwise 3x3 convolution (no bias) is a natural, efficient
-    parameterization of "weights over a local window centred at pixel i".
-    """
-
     def __init__(self, kernel_size=3):
         super().__init__()
         pad = kernel_size // 2
-        self.conv = nn.Conv2d(1, 1, kernel_size=kernel_size, padding=pad, bias=False)
-        # Initialize as (roughly) an average over the neighbourhood.
+        self.conv = nn.Conv2d(1, 1, kernel_size=kernel_size,
+                              padding=pad, bias=False)
         with torch.no_grad():
             self.conv.weight.fill_(1.0 / (kernel_size * kernel_size))
 
     def forward(self, v_next):
-        # v_next: (B, H, W) -> (B, 1, H, W) -> conv -> (B, H, W)
-        return self.conv(v_next.unsqueeze(1)).squeeze(1)
+        # Accept either (B,H,W) or (B,1,H,W)
+        if v_next.ndim == 3:
+            v_next = v_next.unsqueeze(1)
+        elif v_next.ndim != 4:
+            raise ValueError(f"Unexpected shape: {v_next.shape}")
+
+        return self.conv(v_next).squeeze(1)
 
 
 class PixelEnv:
@@ -94,6 +92,7 @@ def compute_targets(rewards, values, gamma, aggregator: NeighborhoodAggregator):
     R = values[T].detach()
     for t in reversed(range(T)):
         # Eq. (8): R_i^(t) = r_i^(t) + gamma * sum_{j in N(i)} w_{i-j} V(s_j^{(t+1)})
+        # print(values[t+1].shape)
         bootstrap = aggregator(values[t + 1].detach()) if t + 1 <= T else R
         R = rewards[t] + gamma * bootstrap
         returns[t] = R
