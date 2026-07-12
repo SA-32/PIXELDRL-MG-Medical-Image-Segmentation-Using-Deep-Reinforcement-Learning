@@ -103,8 +103,8 @@ def compute_losses(log_probs, entropies, values, returns, entropy_coef, value_lo
         V = values[t]
         advantage = R - V                                    # Eq. (14) / (10)
 
-        value_loss = value_loss + (advantage ** 2).mean()     # Eq. (13) / (9)
-        policy_loss = policy_loss + (-log_probs[t] * advantage.detach()).mean()  # Eq. (15)/(11)
+        value_loss   = value_loss + (advantage ** 2).mean()     # Eq. (13) / (9)
+        policy_loss  = policy_loss + (-log_probs[t] * advantage.detach()).mean()  # Eq. (15)/(11)
         entropy_loss = entropy_loss - entropies[t].mean()
 
     policy_loss = policy_loss / T
