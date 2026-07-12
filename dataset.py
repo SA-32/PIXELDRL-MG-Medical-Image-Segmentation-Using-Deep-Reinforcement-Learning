@@ -73,10 +73,14 @@ class MedicalSegmentationDataset(Dataset):
 
         pairs = []
         for img_path in image_paths:
-            fname = os.path.basename(img_path)
-            mask_path = os.path.join(root, mask_dir, fname)
-            if os.path.exists(mask_path):
-                pairs.append((img_path, mask_path))
+          fname = os.path.basename(img_path)
+
+          # Convert image name -> corresponding mask name
+          mask_name = fname.replace(".png", "_mask.png")
+          mask_path = os.path.join(root, mask_dir, mask_name)
+
+          if os.path.exists(mask_path):
+              pairs.append((img_path, mask_path))
 
         # Deterministic shuffle + split, matching "70% / 10% / 20%" in the paper
         rng = random.Random(seed)
