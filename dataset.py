@@ -1,27 +1,3 @@
-"""
-dataset.py
-----------
-Generic 2D medical-image segmentation dataset loader, matching the
-preprocessing described in the paper:
-
-  * 3D volumes are converted to 2D images by taking slices.
-  * Negative samples (slices with no segmentation object) are removed.
-  * Data is split into train (70%) / val (10%) / test (20%).
-
-Works for both datasets used in the paper:
-  - Cardiac (King's College London, MRI, 320x320)      -- binary heart mask
-  - Brain   (LGG segmentation dataset / TCIA, 256x256)  -- binary tumor mask
-
-Expected on-disk layout (adjust `image_glob` / `mask_glob` if yours differs):
-
-    root/
-      images/*.png (or .tif/.npy)
-      masks/*.png  (same filenames as images, binary masks)
-
-If your data is still in NIfTI/3D form, use `slice_volume_to_2d()` below to
-pre-generate the 2D slice dataset first.
-"""
-
 import glob
 import os
 import random
@@ -33,12 +9,7 @@ from PIL import Image
 
 
 def slice_volume_to_2d(volume, mask, axis=2, drop_empty=True):
-    """
-    Converts a 3D (H, W, D) volume + mask into a list of 2D (image, mask)
-    slice pairs, removing empty (no-foreground) slices if drop_empty=True.
-    Use this once, offline, to build a 2D dataset from raw 3D NIfTI data
-    before instantiating `MedicalSegmentationDataset`.
-    """
+ 
     slices = []
     n_slices = volume.shape[axis]
     for i in range(n_slices):
@@ -51,12 +22,7 @@ def slice_volume_to_2d(volume, mask, axis=2, drop_empty=True):
 
 
 class MedicalSegmentationDataset(Dataset):
-    """
-    Loads 2D image/mask pairs from disk and returns normalized tensors:
-        image: (1, H, W) float32 in [0, 1]
-        mask:  (1, H, W) float32 in {0, 1}
-    """
-
+    
     def __init__(self, root, split="train", image_size=None,
                  image_glob="images/*.png", mask_dir="masks",
                  seed=42, split_ratios=(0.7, 0.1, 0.2), k_shot=None):
@@ -76,7 +42,7 @@ class MedicalSegmentationDataset(Dataset):
           fname = os.path.basename(img_path)
 
           # Convert image name -> corresponding mask name
-          mask_name = fname.replace(".png", "_mask.png")
+          mask_name = fname.replace(".png", ".png")
           mask_path = os.path.join(root, mask_dir, mask_name)
 
           if os.path.exists(mask_path):
