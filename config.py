@@ -1,10 +1,3 @@
-"""
-config.py
----------
-Hyperparameters, taken directly from the paper's "Implementation details"
-subsection.
-"""
-
 from dataclasses import dataclass
 
 
@@ -13,7 +6,7 @@ class Config:
     # Data
     in_channels: int = 1
     image_size: tuple = (256, 256)     # set to (320, 320) for Cardiac, (256, 256) for Brain
-    batch_size: int = 2                # "the batch size is set to 2" (GPU memory limited)
+    batch_size: int = 8                # "the batch size is set to 2" (GPU memory limited)
 
     # Optimization ("Adam ... learning rates ... 1e-3, drops by a factor of
     # 0.9 every 25 epochs")
@@ -41,6 +34,6 @@ class Config:
     # Misc
     seed: int = 42
     device: str = "cuda"
-    log_every: int = 10
+    log_every: int = 100
     ckpt_dir: str = "checkpoints"
     results_dir: str = "results"
