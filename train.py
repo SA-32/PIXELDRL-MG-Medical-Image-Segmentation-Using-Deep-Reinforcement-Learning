@@ -1,31 +1,3 @@
-"""
-train.py
---------
-Implements Algorithm 1 ("Training PixelDRL-MG Using a Dynamic Iterative
-Update Policy") from the paper.
-
-Mapping from the paper's Algorithm 1 to this code:
-
-  Input: T_max, t_max, (X, G), segmentation network M(theta_s)          -> `train()` args
-  Line 1: sample a training batch (x, g)                                -> dataloader batch
-  Line 2/6: reset gradients                                             -> optimizer.zero_grad()
-  Line 3/7: thread-specific params theta_p', theta_v', theta_s'         -> (single synchronous
-             synchronized with global theta_p, theta_v, theta_s            copy of the model;
-                                                                             true A3C's per-thread
-                                                                             copies are replaced
-                                                                             by a batched rollout,
-                                                                             see module docstring
-                                                                             in env.py)
-  Line 9: obtain state s_i^(t) for all i                                 -> PixelEnv.init_mask /
-                                                                             temp_input
-  Lines 10-16: rollout for t_start..t_max, performing actions, storing   -> rollout loop below
-               rewards/new states, computing segmentation metrics
-  Line 17: bootstrap R_i from terminal or non-terminal value             -> compute_targets()
-  Lines 18-26: backward accumulation of discounted returns & gradients   -> policy/value losses
-               for theta_p, theta_v, theta_s                                + one backward() call
-  Line 27-28: update parameters, update M via gradient descent           -> optimizer.step()
-"""
-
 import copy
 import os
 import time
@@ -42,18 +14,7 @@ from model import PixelDRL_MG
 
 
 def rollout_episode(model, env, aggregator, image, gt, t_max, gamma, device):
-    """
-    Runs one t_max-step episode of the dynamic iterative update policy for
-    an entire batch of images, collecting log-probs, entropies, values and
-    rewards needed to compute the PA3C losses (Eqs. 8-16).
-
-    Returns:
-        log_probs: list[T] of (B, H, W)
-        entropies: list[T] of (B, H, W)
-        values:    list[T+1] of (B, H, W)   (values[0..T-1] on-policy, values[T] terminal)
-        rewards:   list[T] of (B, H, W)
-        final_mask: (B, 1, H, W) segmentation output f^(T)
-    """
+    
     B, _, H, W = image.shape
     mask = env.init_mask(image)  # m^(0), shape (B, 1, H, W)
 
@@ -85,14 +46,7 @@ def rollout_episode(model, env, aggregator, image, gt, t_max, gamma, device):
 
 
 def compute_losses(log_probs, entropies, values, returns, entropy_coef, value_loss_coef):
-    """
-    PA3C losses in matrix form (Eqs. 13-16):
-
-        A(a,s) = R - V(s)                                    (Eq. 14)
-        dtheta_v ~ (R - V(s))^2                               (Eq. 13/9)
-        dtheta_p ~ -log(pi(a|s)) * A(a,s)                     (Eq. 15/11)
-        dtheta_s = dtheta_p + dtheta_v (shared backbone)      (Eq. 16)
-    """
+    
     policy_loss = 0.0
     value_loss = 0.0
     entropy_loss = 0.0
@@ -116,6 +70,7 @@ def compute_losses(log_probs, entropies, values, returns, entropy_coef, value_lo
 
 
 def train(cfg: Config, train_root, val_root=None, k_shot=None):
+    
     device = torch.device(cfg.device if torch.cuda.is_available() else "cpu")
     torch.manual_seed(cfg.seed)
 
@@ -209,11 +164,7 @@ def train(cfg: Config, train_root, val_root=None, k_shot=None):
 
 @torch.no_grad()
 def evaluate(model, env, data_loader, cfg: Config, device, tag="test"):
-    """
-    Runs the greedy (non-stochastic) dynamic iterative update policy for
-    t_max steps and reports DICE/PPV/SEN/IoU/BIoU/HD95, matching Table 2's
-    evaluation protocol.
-    """
+    
     model.eval()
     all_metrics = []
     for image, gt in data_loader:
